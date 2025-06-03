@@ -107,12 +107,28 @@ def get_icon_category(icon_info: dict, game_titles: list) -> str:
     icon_type = icon_info['type'].lower() if icon_info['type'] else "неизвестный тип"
     full_path_lower = icon_info['full_path'].lower() if icon_info['full_path'] else ""
 
+    is_exe = full_path_lower.endswith(".exe")
+    # Проверяем, находится ли файл непосредственно на рабочем столе
+    # (путь заканчивается на desktop\имя_файла.exe или desktop/имя_файла.exe)
+    # Это упрощенная проверка; более надежно было бы получить путь к рабочему столу системно.
+    is_on_desktop = False
+    if full_path_lower:
+        normalized_path = full_path_lower.replace("/", os.sep)
+        desktop_path_suffix = os.sep + "desktop" + os.sep + name_lower
+        if normalized_path.endswith(desktop_path_suffix):
+             is_on_desktop = True
+        # Также проверяем, если имя файла включает расширение, а name_lower нет
+        elif name_lower.endswith(".exe") and normalized_path.endswith(os.sep + "desktop" + os.sep + name_lower):
+            is_on_desktop = True
+        elif not name_lower.endswith(".exe") and normalized_path.endswith(os.sep + "desktop" + os.sep + name_lower + ".exe"):
+             is_on_desktop = True
+
+
     # 1. Папки (Наивысший приоритет)
     if icon_type == "папка":
         return "Папки"
 
     # 2. Системные элементы (например, Корзина, Этот компьютер)
-    # 'неизвестный тип' часто присваивается системным элементам без реального файла
     if name_lower == "корзина" and icon_type == "неизвестный тип":
         return "Системные"
     system_names_exact = ["этот компьютер", "мой компьютер", "панель управления", "network", "сеть", "computer", "control panel", "recycle bin"]
@@ -125,80 +141,90 @@ def get_icon_category(icon_info: dict, game_titles: list) -> str:
         return "Игры"
 
     # 3.2. Имя иконки совпадает с названием из файла game_titles.txt (высокий приоритет)
-    # game_titles предполагается уже в нижнем регистре из load_game_titles
     if any(game_title == name_lower for game_title in game_titles) or \
-       any(game_title in name_lower for game_title in game_titles): # Дополнительно проверяем вхождение для составных имен
+       any(game_title in name_lower for game_title in game_titles):
         return "Игры"
 
-    # 3.3. Явное указание на известные игры в имени (можно расширять)
+    # 3.3. Явное указание на известные игры в имени
     known_games_keywords = [
         "battlefield", "minecraft", "ведьмак", "witcher", "counter-strike", "csgo", "cs:go",
         "dota 2", "valorant", "fortnite", "overwatch", "cyberpunk", "gta", "stalker",
         "world of warcraft", "league of legends", "apex legends", "genshin impact",
         "warframe", "terraria", "stardew valley", "doom", "elden ring", "baldurs gate", "baldurs gate 3"
-        # Расширенный список
     ]
     if any(game_keyword in name_lower for game_keyword in known_games_keywords):
         return "Игры"
 
-    # 3.4. .exe в папке, содержащей "games" или "игры" как отдельный компонент пути
-    # Эта проверка менее точна, чем предыдущие, но все же полезна.
-    # Используем os.sep для большей кросс-платформенной надежности разделителя.
-    # Проверяем " /games/ ", " /игры/ " или в начале пути "games/", "игры/"
-    if full_path_lower.endswith(".exe"):
-        path_check_strings = [
+    # 3.4. .exe в специфичных игровых директориях ("steamapps", "games", "игры")
+    if is_exe:
+        game_path_indicators = [
+            os.sep + "steamapps" + os.sep,
             os.sep + "games" + os.sep,
             os.sep + "игры" + os.sep,
-            "games" + os.sep, # Для случаев вроде "D:gamesmygame.exe"
-            "игры" + os.sep  # Для случаев вроде "D:игрымояигра.exe"
+            "games" + os.sep, # Корень диска
+            "игры" + os.sep   # Корень диска
         ]
-        if any(check_str in full_path_lower for check_str in path_check_strings):
+        if any(indicator in full_path_lower for indicator in game_path_indicators):
             return "Игры"
-        # Дополнительная проверка на простое вхождение, если предыдущие не сработали (менее точная)
-        # path_parts = re.split(r'[\\/]', full_path_lower)
-        # if len(path_parts) > 1:
-        #     parent_folder_name = path_parts[-2]
-        #     if "games" in parent_folder_name or "игры" in parent_folder_name:
-        #         return "Игры"
 
-
-    # 3.5. Общие игровые ключевые слова (низкий приоритет для игр)
-    game_keywords_general = ["game", "play", "игра", "играть", "launcher"] # "launcher" может быть игровым
-    # Применяем эти слова с осторожностью, чтобы не захватить, например, "проигрыватель"
-    if any(keyword in name_lower for keyword in game_keywords_general) and \
-       not any(prog_kw in name_lower for prog_kw in ["player", "проигрыватель", "редактор", "editor"]): # Исключения
-        # Дополнительная проверка, чтобы не классифицировать Steam или Epic Games Launcher как "Игры" здесь
-        if not any(launcher_name in name_lower for launcher_name in ["steam", "epic games launcher", "battle.net", "origin", "uplay", "gog galaxy"]):
-            if any(keyword in full_path_lower for keyword in game_keywords_general): # Если и в пути есть намек на игру
-                 return "Игры"
+    # 3.5. Общие игровые ключевые слова - применяются с осторожностью, НЕ для .exe на рабочем столе без других признаков
+    if not (is_exe and is_on_desktop): # Ослабляем для .exe на рабочем столе
+        game_keywords_general = ["game", "play", "игра", "играть"] # "launcher" убрано, т.к. игровые лаунчеры есть в known_program_names
+        # Исключаем слова, которые могут указывать на программы, а не игры
+        program_like_keywords = ["player", "проигрыватель", "editor", "редактор", "sdk", "kit", "engine"]
+        if any(keyword in name_lower for keyword in game_keywords_general) and \
+           not any(prog_kw in name_lower for prog_kw in program_like_keywords):
+            # Дополнительная проверка: для .exe файлов требуем также наличие игрового слова в пути,
+            # чтобы избежать ошибочной классификации утилит с "game" в названии.
+            if is_exe:
+                if any(keyword in full_path_lower for keyword in game_keywords_general):
+                    return "Игры"
+            else: # Для не .exe файлов (например, ярлыков без полного пути) старая логика
+                 if any(keyword in full_path_lower for keyword in game_keywords_general) or icon_type == "интернет-ярлык":
+                    # Исключаем игровые лаунчеры, которые должны быть "Программы"
+                    if not any(launcher_name in name_lower for launcher_name in ["steam", "epic games launcher", "battle.net", "origin", "uplay", "gog galaxy"]):
+                        return "Игры"
 
 
     # 4. Программы (проверяются после всех игр)
     known_program_names = [
-        "steam", "epic games launcher", "gog galaxy", "origin", "uplay", "battle.net", # Игровые лаунчеры - это программы
-        "discord", "telegram", "skype", "zoom", "slack",
-        "vscode", "visual studio", "pycharm", "intellij idea", "android studio", "sublime text",
-        "photoshop", "gimp", "blender", "obs studio", "vlc", "k-lite", "winamp",
-        "chrome", "firefox", "edge", "opera", "brave",
-        "word", "excel", "powerpoint", "outlook", "libreoffice", "openoffice",
-        "utorrent", "bittorrent", "filezilla", "putty",
-        "virtualbox", "vmware", "docker", "total commander", "7-zip", "winrar",
-        "ccleaner", "notepad++", "teamviewer", "anydesk"
-        # Можно дополнять по необходимости
+        # Игровые лаунчеры - это программы
+        "steam", "epic games launcher", "gog galaxy", "origin", "uplay", "battle.net", "rockstar games launcher",
+        # ПО для общения
+        "discord", "telegram", "skype", "zoom", "slack", "whatsapp", "viber",
+        # Среды разработки и текстовые редакторы
+        "vscode", "visual studio", "pycharm", "intellij idea", "android studio", "sublime text", "notepad++",
+        # Графические и 3D редакторы, ПО для стриминга
+        "photoshop", "gimp", "blender", "obs studio", "krita", "inkscape", "figma", "autocad", "maya", "3ds max",
+        # Медиаплееры
+        "vlc", "k-lite", "winamp", "aimp", "foobar2000",
+        # Браузеры
+        "chrome", "firefox", "edge", "opera", "brave", "yandex browser",
+        # Офисные пакеты
+        "word", "excel", "powerpoint", "outlook", "libreoffice", "openoffice", "access", "publisher",
+        # Утилиты
+        "utorrent", "bittorrent", "filezilla", "putty", "total commander", "7-zip", "winrar", "daemon tools",
+        "virtualbox", "vmware", "docker", "ccleaner", "teamviewer", "anydesk", "rdp", "mstsc",
+        # Другие популярные программы
+        "evernote", "onedrive", "dropbox", "google drive", "spotify", "itunes", "obsidian"
     ]
     if any(prog_name in name_lower for prog_name in known_program_names):
-        # Steam и другие лаунчеры здесь однозначно "Программы", т.к. игровые ссылки steam:// отсеяны выше
         return "Программы"
 
-    if full_path_lower.endswith(".exe") or icon_type == "ярлык":
+    # Проверка на Program Files для .exe и ярлыков (если не игра)
+    if is_exe or icon_type == "ярлык":
         program_files_paths = ["program files" + os.sep, "program files (x86)" + os.sep]
         if any(pf_path in full_path_lower for pf_path in program_files_paths):
-            return "Программы" # Сильный индикатор программы, если не игра
+            return "Программы"
 
-    # Общая проверка на тип "ярлык" или "файл" (часто .exe), если не классифицировано как игра
-    if icon_type == "ярлык" or icon_type == "файл": # "файл" может быть .exe без пути
+    # Если .exe файл дошел до этого момента и не классифицирован как игра, он считается программой
+    if is_exe:
         return "Программы"
 
+    # Общая проверка на тип "ярлык" (если еще не программа и не игра)
+    if icon_type == "ярлык":
+        return "Программы"
+    # "файл" (без .exe) здесь уже не должен быть программой, если не попал в known_program_names
 
     # 5. Текстовые файлы
     text_extensions = ['.txt', '.md', '.log', '.doc', '.docx', '.rtf', '.odt', '.tex', '.json', '.xml', '.yaml', '.ini', '.cfg', '.py', '.js', '.html', '.css']
@@ -210,15 +236,10 @@ def get_icon_category(icon_info: dict, game_titles: list) -> str:
     if icon_type == "изображение" or any(full_path_lower.endswith(ext) for ext in image_extensions):
         return "Изображения"
 
-    # 7. Интернет-ссылки (не игровые и не Steam)
-    # Проверки на игровые и Steam ссылки уже были выше
-    if icon_type == "интернет-ярлык":
-        # Если это не steam-игра и не ссылка на известные игровые магазины (которые классифицируются как "Программы")
-        web_game_stores = ["steampowered.com", "epicgames.com", "origin.com", "gog.com"] # Уже есть в коде, но для ясности
-        if not any(store_domain in full_path_lower for store_domain in web_game_stores):
-             if full_path_lower.startswith("http://") or full_path_lower.startswith("https://") or full_path_lower.endswith(".url"):
-                return "Интернет-ссылки"
-
+    # 7. Интернет-ссылки (не игровые и не Steam, не магазины приложений)
+    if icon_type == "интернет-ярлык": # Уже проверено, что это не steam://rungameid/ и не игровые магазины
+        if full_path_lower.startswith("http://") or full_path_lower.startswith("https://") or full_path_lower.endswith(".url"):
+            return "Интернет-ссылки"
 
     # 8. Прочее (если ничего из вышеперечисленного не подошло)
     return "Прочее"
