@@ -65,6 +65,151 @@ class LVITEM(ctypes.Structure):
 class POINT(ctypes.Structure):
     _fields_ = [("x", wintypes.LONG), ("y", wintypes.LONG)]
 
+
+def load_game_titles(filename="game_titles.txt") -> list:
+    """
+    Загружает названия игр из файла.
+
+    Args:
+        filename (str): Имя файла для загрузки. По умолчанию "game_titles.txt".
+
+    Returns:
+        list: Список названий игр в нижнем регистре.
+              Возвращает пустой список в случае ошибки.
+    """
+    game_titles = []
+    try:
+        with open(filename, 'r', encoding='utf-8') as f:
+            for line in f:
+                game_titles.append(line.strip().lower())
+        logging.info(f"Успешно загружено {len(game_titles)} названий игр из файла '{filename}'.")
+    except FileNotFoundError:
+        logging.warning(f"Файл с названиями игр '{filename}' не найден. Используется пустой список игр.")
+    except Exception as e:
+        logging.error(f"Произошла ошибка при чтении файла '{filename}': {e}")
+    return game_titles
+
+
+def get_icon_category(icon_info: dict, game_titles: list) -> str:
+    """
+    Определяет категорию иконки на основе ее информации и списка названий игр.
+
+    Args:
+        icon_info (dict): Словарь с информацией об иконке.
+                          Ожидаемые ключи: 'name', 'type', 'full_path'.
+        game_titles (list): Список строк с названиями игр (в нижнем регистре).
+
+    Returns:
+        str: Название категории для иконки.
+    """
+    name_lower = icon_info['name'].lower()
+    # Приводим тип к нижнему регистру для унификации и обрабатываем None
+    icon_type = icon_info['type'].lower() if icon_info['type'] else "неизвестный тип"
+    full_path_lower = icon_info['full_path'].lower() if icon_info['full_path'] else ""
+
+    # 1. Игры
+    # 1.1. Steam-игры через интернет-ярлык
+    if icon_type == "интернет-ярлык" and full_path_lower.startswith("steam://rungameid/"):
+        return "Игры"
+
+    # 1.2. Имя иконки или часть имени в списке game_titles
+    # Приводим game_titles к нижнему регистру на случай, если они еще не такие
+    game_titles_lower = [title.lower() for title in game_titles]
+    if any(game_title in name_lower for game_title in game_titles_lower):
+        return "Игры"
+
+    # 1.3. Ключевые слова "game", "play", "игра", "играть" в имени или пути
+    game_keywords = ["game", "play", "игра", "играть"]
+    if any(keyword in name_lower for keyword in game_keywords) or \
+       any(keyword in full_path_lower for keyword in game_keywords):
+        return "Игры"
+
+    # 1.4. .exe в папке "games" или "игры"
+    if full_path_lower.endswith(".exe"):
+        # Используем os.path.sep для корректного разделения пути в разных ОС
+        # В Windows os.path.sep это '\', но пути могут содержать '/'
+        # Поэтому лучше проверять на оба разделителя или нормализовать путь.
+        # Для простоты, будем считать, что full_path_lower уже нормализован или содержит правильный разделитель.
+        # Однако, безопаснее использовать re.split(r'[\\/]', full_path_lower)
+        path_parts = re.split(r'[\\/]', full_path_lower)
+        if len(path_parts) > 1: # Убедимся, что есть родительская папка
+            parent_folder_name = path_parts[-2] # Имя папки, содержащей файл
+            if "games" in parent_folder_name or "игры" in parent_folder_name:
+                return "Игры"
+
+    # 1.5. Явное указание на известные игры в имени (можно расширять)
+    # Этот список должен быть в нижнем регистре
+    known_games_keywords = [
+        "battlefield", "minecraft", "ведьмак", "witcher", "counter-strike", "csgo", "cs:go",
+        "dota 2", "valorant", "fortnite", "overwatch", "cyberpunk", "gta", "stalker",
+        "world of warcraft", "league of legends", "apex legends", "genshin impact",
+        "warframe", "terraria", "stardew valley", "doom"
+        # Добавьте сюда другие ключевые слова для игр, если необходимо
+    ]
+    if any(game_keyword in name_lower for game_keyword in known_games_keywords):
+        return "Игры"
+
+    # 2. Программы (если не игра)
+    # Steam и Epic Games Launcher - это программы-клиенты, а не сами игры (если не ссылка steam://rungameid/)
+    # Список точных имен программ-лаунчеров (в нижнем регистре)
+    program_launchers_exact = ["steam", "epic games launcher", "battle.net", "origin", "uplay", "gog galaxy", "rockstar games launcher"]
+    if name_lower in program_launchers_exact and not full_path_lower.startswith("steam://rungameid/"):
+        return "Программы"
+
+    # Общая проверка для программ (ярлыки, файлы, exe)
+    # Эта проверка должна идти после более специфичных проверок на игры
+    if (icon_type == "ярлык" or icon_type == "файл" or full_path_lower.endswith(".exe")):
+        # Примеры программ: "Google Chrome", "PyCharm", "Photoshop", "Unity Hub", "Discord"
+        # На данном этапе, если это была игра (.exe или ярлык на игру), она уже должна была быть отфильтрована.
+        # Поэтому, если дошли до сюда с .exe или ярлыком, скорее всего это программа.
+        return "Программы"
+
+
+    # 3. Папки
+    if icon_type == "папка":
+        return "Папки"
+
+    # 4. Текстовые файлы
+    text_extensions = ['.txt', '.md', '.log', '.doc', '.docx', '.rtf', '.odt', '.tex', '.json', '.xml', '.yaml', '.ini', '.cfg', '.py', '.js', '.html', '.css'] # Расширен список
+    if icon_type == "текстовый файл" or any(full_path_lower.endswith(ext) for ext in text_extensions):
+        return "Текстовые файлы"
+
+    # 5. Изображения
+    image_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.ico', '.svg', '.tiff', '.webp', '.psd', '.ai', '.raw'] # Расширен список
+    if icon_type == "изображение" or any(full_path_lower.endswith(ext) for ext in image_extensions):
+        return "Изображения"
+
+    # 6. Интернет-ссылки (не игры и не Steam-ссылки)
+    # Проверка на steam-игры уже была.
+    if icon_type == "интернет-ярлык": # Уже проверено, что это не steam://rungameid/
+        if full_path_lower.startswith("http://") or full_path_lower.startswith("https://") or full_path_lower.endswith(".url"):
+             # Дополнительно проверяем, не является ли это ссылкой на Web-версии игровых клиентов или магазинов
+            web_game_stores = ["steampowered.com", "epicgames.com", "origin.com", "gog.com"]
+            if not any(store_domain in full_path_lower for store_domain in web_game_stores):
+                return "Интернет-ссылки"
+            else: # Если это ссылка на игровой магазин, то это "Программы" (лаунчеры/магазины)
+                return "Программы"
+
+    # 7. Системные (пример: Корзина)
+    # 'неизвестный тип' часто присваивается системным элементам без реального файла
+    if name_lower == "корзина" and icon_type == "неизвестный тип":
+        return "Системные"
+
+    # Другие системные элементы (могут требовать доработки на основе реальных данных)
+    # Имена могут быть локализованы, что усложняет определение
+    system_names_exact = ["этот компьютер", "мой компьютер", "панель управления", "network", "сеть", "computer", "control panel", "recycle bin"]
+    if name_lower in system_names_exact and icon_type == "неизвестный тип":
+        return "Системные"
+
+
+    # 8. Прочее (если ничего из вышеперечисленного не подошло)
+    return "Прочее"
+
+
+# Структура POINT для получения координат
+class POINT(ctypes.Structure):
+    _fields_ = [("x", wintypes.LONG), ("y", wintypes.LONG)]
+
 def get_desktop_listview_handle():
     """
     Возвращает HWND (handle) элемента SysListView32, который отображает иконки рабочего стола.
@@ -130,7 +275,7 @@ def get_desktop_listview_handle():
 
 
 # --- Основная функция для получения информации об иконках ---
-def get_desktop_icon_info(hwnd_listview: int) -> list:
+def get_desktop_icon_info(hwnd_listview: int, game_titles_list: list) -> list:
     """
     Принимает HWND окна SysListView32 рабочего стола и извлекает
     имя, текущие координаты, ИНДЕКС, ТИП и ПОЛНЫЙ ПУТЬ каждой иконки.
@@ -139,6 +284,7 @@ def get_desktop_icon_info(hwnd_listview: int) -> list:
 
     Args:
         hwnd_listview (int): HWND окна SysListView32 (список иконок).
+        game_titles_list (list): Список названий игр для классификации.
 
     Returns:
         list: Список словарей, где каждый словарь содержит
@@ -178,13 +324,15 @@ def get_desktop_icon_info(hwnd_listview: int) -> list:
             logging.warning("Не удалось найти пути к папкам рабочего стола. Определение типов файлов будет ограничено.")
         return paths
 
-    def _determine_item_type(item_name: str, desktop_search_paths: list) -> tuple[str, str]:
+    def _determine_item_type(item_name: str, desktop_search_paths: list, game_titles_list: list) -> tuple[str, str]:
         """
         Определяет тип элемента рабочего стола и его полный путь.
         Для ярлыков (.lnk) возвращает тип "ярлык" и путь к целевому файлу/папке.
         Для интернет-ярлыков (.url) возвращает тип "интернет-ярлык" и URL, на который они ссылаются.
         Возвращает кортеж (тип, полный_путь_или_url_или_пустая_строка).
         """
+        # game_titles_list теперь доступен здесь для последующего использования
+        # в вызове get_icon_category, когда он будет добавлен.
 
         def _resolve_lnk_target(lnk_path: str) -> str:
             """Внутренняя вспомогательная функция для разрешения цели ярлыка .lnk."""
@@ -492,7 +640,7 @@ def get_desktop_icon_info(hwnd_listview: int) -> list:
                         f"Не удалось получить текст для элемента {i}. Код возврата SendMessage: {ret_text}. Ошибка Windows API: {ctypes.FormatError(error_code) if error_code else 'N/A'}")
 
             # Определяем тип элемента и его полный путь
-            item_type, item_full_path = _determine_item_type(item_name, desktop_paths_list)
+            item_type, item_full_path = _determine_item_type(item_name, desktop_paths_list, game_titles_list)
 
             ret_pos = user32.SendMessageW(hwnd_listview, LVM_GETITEMPOSITION, i, remote_point)
             if ret_pos == 1:
@@ -509,9 +657,24 @@ def get_desktop_icon_info(hwnd_listview: int) -> list:
                 logging.warning(
                     f"Не удалось получить позицию для элемента {i} ('{item_name}'). Код возврата SendMessage: {ret_pos}. Ошибка Windows API: {ctypes.FormatError(error_code) if error_code else 'N/A'}")
 
-            # Добавляем полный путь в словарь результата
-            results.append(
-                {'index': i, 'name': item_name, 'coords': (x, y), 'type': item_type, 'full_path': item_full_path})
+            # Создаем словарь данных для классификации
+            icon_data_for_classification = {
+                'name': item_name,
+                'type': item_type,
+                'full_path': item_full_path
+            }
+            # Получаем категорию иконки
+            item_category = get_icon_category(icon_data_for_classification, game_titles_list)
+
+            # Добавляем информацию об иконке, включая категорию, в список результатов
+            results.append({
+                'index': i,
+                'name': item_name,
+                'coords': (x, y),
+                'type': item_type,
+                'full_path': item_full_path,
+                'category': item_category  # Добавляем категорию
+            })
 
     except Exception as e:
         logging.error(f"Произошла общая ошибка при получении данных об иконках: {e}", exc_info=True)
@@ -863,14 +1026,17 @@ if __name__ == "__main__":
         print("Не удалось найти HWND окна рабочего стола.")
 
     if desktop_handle:
+        game_titles_list = load_game_titles() # Загружаем список названий игр
         logging.info("Получение информации об иконках рабочего стола...")
-        icons_info = get_desktop_icon_info(desktop_handle)
+        # Передаем game_titles_list в функцию
+        icons_info = get_desktop_icon_info(desktop_handle, game_titles_list)
 
         if icons_info:
             print("\n--- Информация об иконках рабочего стола ---")
             for icon in icons_info:
                 # Изменено для вывода индекса, типа и полного пути
-                print(f"Индекс: {icon['index']}, Имя: \"{icon['name']}\", Тип: {icon['type']}, Координаты: {icon['coords']}, Путь: {icon['full_path'] if icon['full_path'] else 'Не определен'}")
+                # Категория теперь извлекается из данных иконки, где она была сохранена
+                print(f"Индекс: {icon['index']}, Имя: \"{icon['name']}\", Тип: {icon['type']}, Координаты: {icon['coords']}, Путь: {icon['full_path'] if icon['full_path'] else 'Не определен'}, Категория: {icon['category']}")
 
             print(f"\nВсего иконок: {len(icons_info)}")
 
@@ -879,6 +1045,3 @@ if __name__ == "__main__":
             print("Не удалось получить информацию об иконках.")
     else:
         print("Не удалось найти HWND SysListView32 рабочего стола. Убедитесь, что вы работаете на Windows и рабочий стол активен.")
-
-
-
