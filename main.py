@@ -93,156 +93,237 @@ def load_game_titles(filename="game_titles.txt") -> list:
 def get_icon_category(icon_info: dict, game_titles: list) -> str:
     """
     Определяет категорию иконки на основе ее информации и списка названий игр.
-    Порядок проверки: Папки -> Системные -> Игры -> Программы -> Файлы/Ссылки -> Прочее.
-
-    Args:
-        icon_info (dict): Словарь с информацией об иконке.
-                          Ожидаемые ключи: 'name', 'type', 'full_path'.
-        game_titles (list): Список строк с названиями игр (в нижнем регистре).
-
-    Returns:
-        str: Название категории для иконки.
+    Использует расширенную информацию об иконке, включая оригинальное имя и тип.
     """
-    name_lower = icon_info['name'].lower()
-    icon_type = icon_info['type'].lower() if icon_info['type'] else "неизвестный тип"
-    full_path_lower = icon_info['full_path'].lower() if icon_info['full_path'] else ""
+    # Инициализация переменных из icon_info
+    name_lower = icon_info['name'].lower() # Имя для классификации (например, имя цели ярлыка)
+    resolved_icon_type_lower = icon_info['type'].lower() if icon_info['type'] else "неизвестный тип"
+    path_lower = icon_info['full_path'].lower() if icon_info['full_path'] else ""
+    original_icon_name_lower = icon_info['original_icon_name'].lower()
+    original_desktop_type_lower = icon_info['original_desktop_type'].lower()
 
-    is_exe = full_path_lower.endswith(".exe")
-    # Проверяем, находится ли файл непосредственно на рабочем столе
-    # (путь заканчивается на desktop\имя_файла.exe или desktop/имя_файла.exe)
-    # Это упрощенная проверка; более надежно было бы получить путь к рабочему столу системно.
-    is_on_desktop = False
-    if full_path_lower:
-        normalized_path = full_path_lower.replace("/", os.sep)
-        desktop_path_suffix = os.sep + "desktop" + os.sep + name_lower
-        if normalized_path.endswith(desktop_path_suffix):
-             is_on_desktop = True
-        # Также проверяем, если имя файла включает расширение, а name_lower нет
-        elif name_lower.endswith(".exe") and normalized_path.endswith(os.sep + "desktop" + os.sep + name_lower):
-            is_on_desktop = True
-        elif not name_lower.endswith(".exe") and normalized_path.endswith(os.sep + "desktop" + os.sep + name_lower + ".exe"):
-             is_on_desktop = True
+    file_extension = None
+    if path_lower and resolved_icon_type_lower != "папка" and \
+       not path_lower.startswith("http") and \
+       not path_lower.startswith("steam:") and \
+       not path_lower.startswith("epicgames:") and \
+       '.' in os.path.basename(path_lower):
+        file_extension = os.path.splitext(os.path.basename(path_lower))[1].lower()
 
+    # Определения списков и словарей
+    system_names_exact = ["корзина", "этот компьютер", "мой компьютер", "панель управления", "network", "сеть", "computer", "control panel", "recycle bin"]
 
-    # 1. Папки (Наивысший приоритет)
-    if icon_type == "папка":
+    doc_extensions = [
+        '.txt', '.md', '.log', '.doc', '.docx', '.rtf', '.odt', '.tex', '.json', '.xml',
+        '.yaml', '.ini', '.cfg', '.pdf', '.xls', '.xlsx', '.ppt', '.pptx', '.csv',
+        '.epub', '.mobi'
+    ]
+    img_extensions = [
+        '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.ico', '.svg', '.tiff', '.webp',
+        '.psd', '.ai', '.raw', '.heic', '.heif'
+    ]
+    video_extensions = [
+        '.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.mpeg', '.mpg'
+    ]
+    audio_extensions = [
+        '.mp3', '.wav', '.ogg', '.flac', '.aac', '.m4a', '.wma'
+    ]
+    archive_extensions = [
+        '.zip', '.rar', '.7z', '.tar', '.gz', '.bz2', '.xz', '.iso'
+    ]
+    dev_extensions = [
+        '.py', '.pyw', '.js', '.html', '.css', '.java', '.class', '.cpp', '.c', '.h',
+        '.hpp', '.cs', '.sh', '.bat', '.ps1', '.php', '.rb', '.go', '.swift', '.kt',
+        '.kts', '.sql', '.ipynb', '.jar', '.sln', '.csproj', '.vb', '.ts'
+    ]
+
+    known_program_exe_strict = {
+        "chrome.exe": "Браузеры", "firefox.exe": "Браузеры", "msedge.exe": "Браузеры",
+        "opera.exe": "Браузеры", "iexplore.exe": "Браузеры",
+        "winword.exe": "Офисные программы", "excel.exe": "Офисные программы",
+        "powerpnt.exe": "Офисные программы", "outlook.exe": "Офисные программы",
+        "libreoffice.exe": "Офисные программы", "soffice.bin": "Офисные программы",
+        "pycharm64.exe": "Разработка", "pycharm.exe": "Разработка",
+        "idea64.exe": "Разработка", "idea.exe": "Разработка",
+        "code.exe": "Разработка", "devenv.exe": "Разработка", "atom.exe": "Разработка",
+        "sublimetext.exe": "Разработка", "notepad++.exe": "Разработка",
+        "vlc.exe": "Мультимедиа", "wmplayer.exe": "Мультимедиа", "spotify.exe": "Мультимедиа",
+        "itunes.exe": "Мультимедиа", "audacity.exe": "Мультимедиа",
+        "photoshop.exe": "Графика и 3D", "gimp-2.10.exe": "Графика и 3D", "gimp.exe": "Графика и 3D",
+        "blender.exe": "Графика и 3D",
+        "obs64.exe": "Утилиты", "obs32.exe": "Утилиты",
+        "utorrent.exe": "Утилиты", "qbittorrent.exe": "Утилиты", "filezilla.exe": "Утилиты",
+        "explorer.exe": "Системные", "taskmgr.exe": "Системные", "cmd.exe": "Системные",
+        "powershell.exe": "Системные", "regedit.exe": "Системные", "control.exe": "Системные",
+        "discord.exe": "Мессенджеры", "telegram.exe": "Мессенджеры", "skype.exe": "Мессенджеры",
+        "zoom.exe": "Мессенджеры", "slack.exe": "Мессенджеры",
+        "steam.exe": "Игровые платформы", "epicgameslauncher.exe": "Игровые платформы",
+        "battle.net.exe": "Игровые платформы", "origin.exe": "Игровые платформы",
+        "goggalaxy.exe": "Игровые платформы", "ubisoftconnect.exe": "Игровые платформы",
+        "fileweederapp.exe": "Утилиты", "hfs.exe": "Утилиты", "x360ce.exe": "Утилиты",
+        "engine.exe": "Программы" # Generic, hopefully caught by game name first
+    }
+    known_program_keywords_broader = {
+        "visual studio", "pycharm", "intellij idea", "android studio",
+        "google chrome", "mozilla firefox", "microsoft edge", "opera browser",
+        "microsoft office", "libreoffice", "openoffice",
+        "adobe photoshop", "adobe illustrator", "adobe premiere", "adobe acrobat",
+        "autodesk autocad", "autodesk maya", "autodesk 3ds max",
+        "obs studio", "vlc media player", "windows media player",
+        "control panel", "панель управления", "диспетчер задач", "task manager",
+        "command prompt", "powershell", "terminal",
+        "steam", "epic games launcher", "battle.net", "origin client", "gog galaxy", "uplay", "ubisoft connect",
+        "utorrent", "bittorrent", "discord", "telegram desktop", "skype", "zoom meetings",
+        "audacity", "blender", "gimp", "notepad++", "sublime text", "vs code",
+        "fileweeder", "http file server"
+    }
+
+    known_games_keywords_strict = [
+        "minecraft", "fortnite", "valorant", "league of legends", "dota 2",
+        "counter-strike", "csgo", "cs:go", "cyberpunk 2077", "the witcher", "ведьмак",
+        "grand theft auto", "gta v", "stray", "elden ring", "baldurs gate", "baldurs gate 3",
+        "starcraft", "diablo", "overwatch", "world of warcraft",
+        "call of duty", "battlefield", "apex legends", "genshin impact",
+        "terraria", "stardew valley", "doom", "fallout", "skyrim",
+        "civilization", "sims", "fifa", "nba 2k",
+        "lego® звездные войны™ скайуокер сага", "корсары - гпк rev.3" # From logs, will be lowercased by logic
+    ]
+    # Convert strict game keywords to lowercase once, as they are compared with lowercased names
+    known_games_keywords_strict = [kw.lower() for kw in known_games_keywords_strict]
+
+    game_path_indicators = [
+        os.path.join("steam", "steamapps", "common"), # Relative to Program Files or library
+        os.path.join("steamlibrary", "steamapps", "common"),
+        os.path.join("epic games"),
+        os.path.join("gog games"),
+        os.path.join("origin games"),
+        os.path.join("ubisoft", "ubisoft game launcher", "games"),
+        os.path.join("blizzard"),
+        os.path.join("riot games"),
+        os.path.join("my games"),
+        "games" + os.sep, # e.g. D:\Games\
+        "игры" + os.sep   # e.g. D:\Игры\
+    ]
+    # Add Program Files paths dynamically
+    pf_paths = [os.environ.get("ProgramFiles", "C:\\Program Files"),
+                os.environ.get("ProgramFiles(x86)", "C:\\Program Files (x86)")]
+    for pf_path in pf_paths:
+        if pf_path: # Ensure the env variable exists
+            game_path_indicators.append(os.path.join(pf_path.lower(), "steam", "steamapps", "common"))
+            # Add other specific game launcher paths under Program Files if needed
+
+    # 1. Папки
+    if resolved_icon_type_lower == "папка":
         return "Папки"
 
-    # 2. Системные элементы (например, Корзина, Этот компьютер)
-    if name_lower == "корзина" and icon_type == "неизвестный тип":
-        return "Системные"
-    system_names_exact = ["этот компьютер", "мой компьютер", "панель управления", "network", "сеть", "computer", "control panel", "recycle bin"]
-    if name_lower in system_names_exact and icon_type == "неизвестный тип":
+    # 2. Системные элементы
+    if original_desktop_type_lower == "неизвестный тип" and original_icon_name_lower in system_names_exact:
         return "Системные"
 
-    # 3. Игры (проверяются перед программами)
-    # 3.1. Steam-игры через интернет-ярлык (очень точный признак)
-    if icon_type == "интернет-ярлык" and full_path_lower.startswith("steam://rungameid/"):
-        return "Игры"
+    # 3. Интернет-ярлыки
+    if original_desktop_type_lower == "интернет-ярлык":
+        if path_lower.startswith("steam://rungameid/"):
+            return "Игры" # Steam игры - особый случай
+        if path_lower.startswith("epicgames://"): # Hypothetical, for Epic Games Launcher if it uses such links
+             return "Игры"
+        # Известные сайты/сервисы
+        known_sites = {
+            "docs.google.com": "Документы (Онлайн)",
+            "youtube.com": "Мультимедиа (Онлайн)", "youtu.be": "Мультимедиа (Онлайн)",
+            "github.com": "Разработка (Онлайн)",
+            "figma.com": "Дизайн (Онлайн)",
+            "drive.google.com": "Файлы (Облако)", "onedrive.live.com": "Файлы (Облако)", "dropbox.com": "Файлы (Облако)",
+            # Можно добавить игровые магазины или страницы игр, если они не через спец. протоколы
+            "store.steampowered.com": "Игры (Магазин)", "epicgames.com/store": "Игры (Магазин)", "gog.com": "Игры (Магазин)",
+        }
+        for domain, category in known_sites.items():
+            if domain in path_lower:
+                return category
+        return "Интернет-ссылки" # Общая категория для остальных URL
 
-    # 3.2. Имя иконки совпадает с названием из файла game_titles.txt (высокий приоритет)
-    if any(game_title == name_lower for game_title in game_titles) or \
-       any(game_title in name_lower for game_title in game_titles):
-        return "Игры"
+    # 4. Классификация по расширению файла (используем file_extension)
+    if file_extension:
+        if file_extension in doc_extensions: return "Документы"
+        if file_extension in img_extensions: return "Изображения"
+        if file_extension in video_extensions: return "Видео"
+        if file_extension in audio_extensions: return "Аудио"
+        if file_extension in archive_extensions: return "Архивы"
+        if file_extension in dev_extensions: return "Файлы разработки"
+        # .exe файлы будут обработаны ниже, чтобы сначала проверить на известные программы/игры
 
-    # 3.3. Явное указание на известные игры в имени
-    known_games_keywords = [
-        "battlefield", "minecraft", "ведьмак", "witcher", "counter-strike", "csgo", "cs:go",
-        "dota 2", "valorant", "fortnite", "overwatch", "cyberpunk", "gta", "stalker",
-        "world of warcraft", "league of legends", "apex legends", "genshin impact",
-        "warframe", "terraria", "stardew valley", "doom", "elden ring", "baldurs gate", "baldurs gate 3"
-    ]
-    if any(game_keyword in name_lower for game_keyword in known_games_keywords):
-        return "Игры"
+    # 5. Идентификация известных неигровых программ
+    exe_name = None
+    if file_extension == ".exe" and path_lower:
+        exe_name = os.path.basename(path_lower) # path_lower здесь это resolved path
+        if exe_name in known_program_exe_strict:
+            return known_program_exe_strict[exe_name]
 
-    # 3.4. .exe в специфичных игровых директориях ("steamapps", "games", "игры")
-    if is_exe:
-        game_path_indicators = [
-            os.sep + "steamapps" + os.sep,
-            os.sep + "games" + os.sep,
-            os.sep + "игры" + os.sep,
-            "games" + os.sep, # Корень диска
-            "игры" + os.sep   # Корень диска
-        ]
-        if any(indicator in full_path_lower for indicator in game_path_indicators):
-            return "Игры"
-
-    # 3.5. Общие игровые ключевые слова - применяются с осторожностью, НЕ для .exe на рабочем столе без других признаков
-    if not (is_exe and is_on_desktop): # Ослабляем для .exe на рабочем столе
-        game_keywords_general = ["game", "play", "игра", "играть"] # "launcher" убрано, т.к. игровые лаунчеры есть в known_program_names
-        # Исключаем слова, которые могут указывать на программы, а не игры
-        program_like_keywords = ["player", "проигрыватель", "editor", "редактор", "sdk", "kit", "engine"]
-        if any(keyword in name_lower for keyword in game_keywords_general) and \
-           not any(prog_kw in name_lower for prog_kw in program_like_keywords):
-            # Дополнительная проверка: для .exe файлов требуем также наличие игрового слова в пути,
-            # чтобы избежать ошибочной классификации утилит с "game" в названии.
-            if is_exe:
-                if any(keyword in full_path_lower for keyword in game_keywords_general):
-                    return "Игры"
-            else: # Для не .exe файлов (например, ярлыков без полного пути) старая логика
-                 if any(keyword in full_path_lower for keyword in game_keywords_general) or icon_type == "интернет-ярлык":
-                    # Исключаем игровые лаунчеры, которые должны быть "Программы"
-                    if not any(launcher_name in name_lower for launcher_name in ["steam", "epic games launcher", "battle.net", "origin", "uplay", "gog galaxy"]):
-                        return "Игры"
-
-
-    # 4. Программы (проверяются после всех игр)
-    known_program_names = [
-        # Игровые лаунчеры - это программы
-        "steam", "epic games launcher", "gog galaxy", "origin", "uplay", "battle.net", "rockstar games launcher",
-        # ПО для общения
-        "discord", "telegram", "skype", "zoom", "slack", "whatsapp", "viber",
-        # Среды разработки и текстовые редакторы
-        "vscode", "visual studio", "pycharm", "intellij idea", "android studio", "sublime text", "notepad++",
-        # Графические и 3D редакторы, ПО для стриминга
-        "photoshop", "gimp", "blender", "obs studio", "krita", "inkscape", "figma", "autocad", "maya", "3ds max",
-        # Медиаплееры
-        "vlc", "k-lite", "winamp", "aimp", "foobar2000",
-        # Браузеры
-        "chrome", "firefox", "edge", "opera", "brave", "yandex browser",
-        # Офисные пакеты
-        "word", "excel", "powerpoint", "outlook", "libreoffice", "openoffice", "access", "publisher",
-        # Утилиты
-        "utorrent", "bittorrent", "filezilla", "putty", "total commander", "7-zip", "winrar", "daemon tools",
-        "virtualbox", "vmware", "docker", "ccleaner", "teamviewer", "anydesk", "rdp", "mstsc",
-        # Другие популярные программы
-        "evernote", "onedrive", "dropbox", "google drive", "spotify", "itunes", "obsidian"
-    ]
-    if any(prog_name in name_lower for prog_name in known_program_names):
-        return "Программы"
-
-    # Проверка на Program Files для .exe и ярлыков (если не игра)
-    if is_exe or icon_type == "ярлык":
-        program_files_paths = ["program files" + os.sep, "program files (x86)" + os.sep]
-        if any(pf_path in full_path_lower for pf_path in program_files_paths):
+    # Проверка по ключевым словам для программ (имя и путь)
+    # name_lower - это resolved name, original_icon_name_lower - это имя иконки на раб. столе
+    for keyword_set in [name_lower, original_icon_name_lower, path_lower]:
+        if any(prog_keyword in keyword_set for prog_keyword in known_program_keywords_broader):
             return "Программы"
 
-    # Если .exe файл дошел до этого момента и не классифицирован как игра, он считается программой
-    if is_exe:
+    # Проверка на Program Files или System32 для .exe и ярлыков, указывающих на .exe
+    if resolved_icon_type_lower == "исполняемый файл" or \
+       (original_desktop_type_lower == "ярлык" and file_extension == ".exe"): # Ярлык на .exe
+        program_files_paths = [
+            os.environ.get("ProgramFiles", "C:\\Program Files").lower() + os.sep,
+            os.environ.get("ProgramFiles(x86)", "C:\\Program Files (x86)").lower() + os.sep,
+            os.environ.get("WinDir", "C:\\Windows").lower() + os.sep + "system32" + os.sep,
+        ]
+        if any(pf_path in path_lower for pf_path in program_files_paths):
+            # Исключаем игровые лаунчеры, которые могут быть в Program Files, но уже отнесены к программам
+            # или если игра случайно установлена в Program Files, но её имя есть в game_titles
+            if name_lower in game_titles or original_icon_name_lower in game_titles:
+                 return "Игры" # Если игра по названию, но в Program Files
+            if exe_name and exe_name.lower() in ["steam.exe", "epicgameslauncher.exe", "gog galaxy.exe", "battle.net launcher.exe"]: # Уже обработано выше, но для надежности
+                return "Программы"
+            return "Программы"
+
+
+    # 6. Идентификация игр (game_titles - основной список из файла)
+    # name_lower это resolved name (например, "witcher3.exe" -> "witcher3")
+    # original_icon_name_lower это имя иконки на рабочем столе (например, "Ведьмак 3")
+    # game_titles are already lowercase
+    if name_lower in game_titles or original_icon_name_lower in game_titles:
+        return "Игры"
+    # Partial matches with game_titles (which is a list of lowercase strings)
+    if any(game_title_part in name_lower for game_title_part in game_titles if len(game_title_part) > 3):
+        return "Игры"
+    if any(game_title_part in original_icon_name_lower for game_title_part in game_titles if len(game_title_part) > 3):
+        return "Игры"
+
+    # known_games_keywords_strict are already lowercased during initialization
+    for keyword in known_games_keywords_strict:
+        if keyword in name_lower or keyword in original_icon_name_lower:
+            return "Игры"
+
+    # Проверка пути для игр (если это .exe или ярлык на .exe)
+    # path_lower is already lowercase. game_path_indicators should be constructed with lowercase components.
+    if resolved_icon_type_lower == "исполняемый файл" or \
+       (original_desktop_type_lower == "ярлык" and file_extension == ".exe"):
+        # Ensure all indicators are lowercase for comparison with path_lower
+        normalized_game_path_indicators = [ind.lower().replace("\\", os.sep).replace("/", os.sep) for ind in game_path_indicators]
+        normalized_path_lower = path_lower.replace("\\", os.sep).replace("/", os.sep)
+        if any(indicator in normalized_path_lower for indicator in normalized_game_path_indicators):
+            return "Игры"
+
+    # 7. Обработка оставшихся .exe файлов
+    # Если дошли до сюда, и это .exe, то это, скорее всего, программа (не системная, не известная игра)
+    if resolved_icon_type_lower == "исполняемый файл" or file_extension == ".exe":
         return "Программы"
 
-    # Общая проверка на тип "ярлык" (если еще не программа и не игра)
-    if icon_type == "ярлык":
-        return "Программы"
-    # "файл" (без .exe) здесь уже не должен быть программой, если не попал в known_program_names
+    # 8. Оставшиеся ярлыки (которые не указывают на известные игры/программы или не были разрешены в .exe)
+    if original_desktop_type_lower == "ярлык":
+        return "Ярлыки (Прочее)" # Общая категория для неопознанных ярлыков
 
-    # 5. Текстовые файлы
-    text_extensions = ['.txt', '.md', '.log', '.doc', '.docx', '.rtf', '.odt', '.tex', '.json', '.xml', '.yaml', '.ini', '.cfg', '.py', '.js', '.html', '.css']
-    if icon_type == "текстовый файл" or any(full_path_lower.endswith(ext) for ext in text_extensions):
-        return "Текстовые файлы"
+    # 9. Прочие файлы (если есть расширение, но не подошло под предыдущие категории)
+    if file_extension: # Любой файл с расширением, не классифицированный выше
+        return "Файлы (Прочее)"
 
-    # 6. Изображения
-    image_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.ico', '.svg', '.tiff', '.webp', '.psd', '.ai', '.raw']
-    if icon_type == "изображение" or any(full_path_lower.endswith(ext) for ext in image_extensions):
-        return "Изображения"
-
-    # 7. Интернет-ссылки (не игровые и не Steam, не магазины приложений)
-    if icon_type == "интернет-ярлык": # Уже проверено, что это не steam://rungameid/ и не игровые магазины
-        if full_path_lower.startswith("http://") or full_path_lower.startswith("https://") or full_path_lower.endswith(".url"):
-            return "Интернет-ссылки"
-
-    # 8. Прочее (если ничего из вышеперечисленного не подошло)
-    return "Прочее"
+    # 10. Категория по умолчанию
+    return "Неизвестно" # Если ничего не подошло
 
 
 # Структура POINT для получения координат
@@ -363,15 +444,14 @@ def get_desktop_icon_info(hwnd_listview: int, game_titles_list: list) -> list:
             logging.warning("Не удалось найти пути к папкам рабочего стола. Определение типов файлов будет ограничено.")
         return paths
 
-    def _determine_item_type(item_name: str, desktop_search_paths: list, game_titles_list: list) -> tuple[str, str]:
+    def _determine_item_type(item_name: str, desktop_search_paths: list, game_titles_list: list) -> tuple[str, str, str, str]:
         """
-        Определяет тип элемента рабочего стола и его полный путь.
-        Для ярлыков (.lnk) возвращает тип "ярлык" и путь к целевому файлу/папке.
-        Для интернет-ярлыков (.url) возвращает тип "интернет-ярлык" и URL, на который они ссылаются.
-        Возвращает кортеж (тип, полный_путь_или_url_или_пустая_строка).
+        Определяет тип элемента рабочего стола, его полный путь, имя для классификации и начальный тип.
+        Для ярлыков (.lnk) возвращает тип целевого элемента, путь к цели, имя цели и "ярлык" как начальный тип.
+        Для интернет-ярлыков (.url) возвращает "интернет-ярлык", URL, имя .url файла и "интернет-ярлык" как начальный тип.
+        Возвращает кортеж (имя_для_классификации, тип, полный_путь_или_url_или_пустая_строка, начальный_тип_до_разрешения).
         """
-        # game_titles_list теперь доступен здесь для последующего использования
-        # в вызове get_icon_category, когда он будет добавлен.
+        # game_titles_list не используется напрямую в этой функции
 
         def _resolve_lnk_target(lnk_path: str) -> str:
             """Внутренняя вспомогательная функция для разрешения цели ярлыка .lnk."""
@@ -446,8 +526,13 @@ def get_desktop_icon_info(hwnd_listview: int, game_titles_list: list) -> list:
                 return ""
 
 
-        determined_type = "неизвестный тип"
-        determined_path = ""  # Будет хранить полный путь к элементу, его цель, или URL
+        determined_type = "неизвестный тип" # Это будет тип цели или сам тип файла
+        initial_type_before_resolve = "неизвестный тип" # Тип файла как он есть на рабочем столе
+        determined_path = ""
+        final_item_name_for_classification = item_name # По умолчанию используется исходное имя
+
+        original_item_name_without_ext, original_item_ext = os.path.splitext(item_name)
+        original_item_ext = original_item_ext.lower()
 
         # 1. Поиск на рабочих столах (пользовательском и общем)
         for search_path_dir in desktop_search_paths:
@@ -455,94 +540,175 @@ def get_desktop_icon_info(hwnd_listview: int, game_titles_list: list) -> list:
             full_path_candidate = os.path.join(search_path_dir, item_name)
             if os.path.exists(full_path_candidate):
                 if os.path.isdir(full_path_candidate):
+                    initial_type_before_resolve = "папка"
                     determined_type = "папка"
                     determined_path = full_path_candidate
-                    return determined_type, determined_path
+                    final_item_name_for_classification = os.path.basename(full_path_candidate)
+                    return final_item_name_for_classification, determined_type, determined_path, initial_type_before_resolve
                 elif os.path.isfile(full_path_candidate):
-                    _, ext = os.path.splitext(full_path_candidate)
-                    ext = ext.lower()
-                    if ext == '.lnk':
-                        determined_type = "ярлык"
-                        target_path = _resolve_lnk_target(full_path_candidate)
-                        determined_path = target_path if target_path else full_path_candidate
-                        return determined_type, determined_path
-                    elif ext == '.url':
-                        determined_type = "интернет-ярлык"
-                        target_url = _resolve_url_target(full_path_candidate)
-                        determined_path = target_url if target_url else full_path_candidate
-                        return determined_type, determined_path
-                    elif ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp', '.ico']:
-                        determined_type = "изображение"
-                    elif ext == '.txt':
-                        determined_type = "текстовый файл"
-                    elif ext == '.pdf':
-                        determined_type = "пдф"
-                    else:
-                        determined_type = "файл"
-                    determined_path = full_path_candidate
-                    return determined_type, determined_path
+                    name_part, ext_part = os.path.splitext(full_path_candidate)
+                    ext_lower = ext_part.lower()
 
-            # B. Если точное совпадение не найдено, проверяем, не ярлык ли это (.lnk)
-            #    Имя элемента в ListView ("Мой ярлык") может отличаться от имени файла ("Мой ярлык.lnk")
+                    if ext_lower == '.lnk':
+                        initial_type_before_resolve = "ярлык"
+                        target_path = _resolve_lnk_target(full_path_candidate)
+                        if target_path and os.path.exists(target_path):
+                            determined_path = target_path
+                            if os.path.isdir(target_path):
+                                determined_type = "папка"
+                                final_item_name_for_classification = os.path.basename(target_path)
+                            else:
+                                target_name_no_ext, target_ext = os.path.splitext(os.path.basename(target_path))
+                                final_item_name_for_classification = target_name_no_ext
+                                target_ext_lower = target_ext.lower()
+                                if target_ext_lower == '.exe': determined_type = "исполняемый файл"
+                                elif target_ext_lower in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.ico']: determined_type = "изображение"
+                                elif target_ext_lower in ['.txt', '.doc', '.docx', '.rtf', '.odt']: determined_type = "текстовый файл"
+                                elif target_ext_lower == '.pdf': determined_type = "пдф"
+                                else: determined_type = "файл"
+                        else:
+                            determined_type = "ярлык" # Остается ярлыком, если цель не найдена
+                            determined_path = full_path_candidate
+                            final_item_name_for_classification = original_item_name_without_ext if original_item_ext == ".lnk" else item_name
+                        return final_item_name_for_classification, determined_type, determined_path, initial_type_before_resolve
+
+                    elif ext_lower == '.url':
+                        initial_type_before_resolve = "интернет-ярлык"
+                        target_url = _resolve_url_target(full_path_candidate)
+                        if target_url:
+                            determined_type = "интернет-ярлык"
+                            determined_path = target_url
+                            final_item_name_for_classification = original_item_name_without_ext if original_item_ext == ".url" else item_name
+                        else:
+                            determined_type = "интернет-ярлык"
+                            determined_path = full_path_candidate
+                            final_item_name_for_classification = original_item_name_without_ext if original_item_ext == ".url" else item_name
+                        return final_item_name_for_classification, determined_type, determined_path, initial_type_before_resolve
+
+                    # Обычные файлы (не ярлыки)
+                    initial_type_before_resolve = "файл" # Общий начальный тип для файлов
+                    final_item_name_for_classification = os.path.splitext(os.path.basename(full_path_candidate))[0]
+                    if ext_lower in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp', '.ico']:
+                        determined_type = "изображение"
+                        initial_type_before_resolve = "изображение"
+                    elif ext_lower == '.txt':
+                        determined_type = "текстовый файл"
+                        initial_type_before_resolve = "текстовый файл"
+                    elif ext_lower == '.pdf':
+                        determined_type = "пдф"
+                        initial_type_before_resolve = "пдф"
+                    elif ext_lower == '.exe':
+                        determined_type = "исполняемый файл"
+                        initial_type_before_resolve = "исполняемый файл"
+                    else:
+                        determined_type = "файл" # Остается "файл", если не более специфичный тип
+                    determined_path = full_path_candidate
+                    return final_item_name_for_classification, determined_type, determined_path, initial_type_before_resolve
+
             shortcut_path_candidate_lnk = os.path.join(search_path_dir, item_name + ".lnk")
             if os.path.isfile(shortcut_path_candidate_lnk):
-                determined_type = "ярлык"
+                initial_type_before_resolve = "ярлык"
                 target_path = _resolve_lnk_target(shortcut_path_candidate_lnk)
-                determined_path = target_path if target_path else shortcut_path_candidate_lnk
-                return determined_type, determined_path
+                if target_path and os.path.exists(target_path):
+                    determined_path = target_path
+                    if os.path.isdir(target_path):
+                        determined_type = "папка"
+                        final_item_name_for_classification = os.path.basename(target_path)
+                    else:
+                        target_name_no_ext, target_ext = os.path.splitext(os.path.basename(target_path))
+                        final_item_name_for_classification = target_name_no_ext
+                        target_ext_lower = target_ext.lower()
+                        if target_ext_lower == '.exe': determined_type = "исполняемый файл"
+                        elif target_ext_lower in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.ico']: determined_type = "изображение"
+                        elif target_ext_lower in ['.txt', '.doc', '.docx', '.rtf', '.odt']: determined_type = "текстовый файл"
+                        elif target_ext_lower == '.pdf': determined_type = "пдф"
+                        else: determined_type = "файл"
+                else:
+                    determined_type = "ярлык"
+                    determined_path = shortcut_path_candidate_lnk
+                    final_item_name_for_classification = item_name
+                return final_item_name_for_classification, determined_type, determined_path, initial_type_before_resolve
 
-            # C. Проверяем, не интернет-ярлык ли это (.url)
-            #    Аналогично, имя в ListView может не содержать ".url"
             shortcut_path_candidate_url = os.path.join(search_path_dir, item_name + ".url")
             if os.path.isfile(shortcut_path_candidate_url):
-                determined_type = "интернет-ярлык"
+                initial_type_before_resolve = "интернет-ярлык"
                 target_url = _resolve_url_target(shortcut_path_candidate_url)
-                determined_path = target_url if target_url else shortcut_path_candidate_url
-                return determined_type, determined_path
-
-            # D. Проверяем элементы, у которых расширение (.lnk или .url) уже может быть в имени из ListView
-            if item_name.lower().endswith(".lnk"):
-                full_path_candidate_with_ext = os.path.join(search_path_dir, item_name)
-                if os.path.isfile(full_path_candidate_with_ext):
-                    determined_type = "ярлык"
-                    target_path = _resolve_lnk_target(full_path_candidate_with_ext)
-                    determined_path = target_path if target_path else full_path_candidate_with_ext
-                    return determined_type, determined_path
-            elif item_name.lower().endswith(".url"):
-                full_path_candidate_with_ext = os.path.join(search_path_dir, item_name)
-                if os.path.isfile(full_path_candidate_with_ext):
+                if target_url:
                     determined_type = "интернет-ярлык"
+                    determined_path = target_url
+                    final_item_name_for_classification = item_name
+                else:
+                    determined_type = "интернет-ярлык"
+                    determined_path = shortcut_path_candidate_url
+                    final_item_name_for_classification = item_name
+                return final_item_name_for_classification, determined_type, determined_path, initial_type_before_resolve
+
+            if original_item_ext == ".lnk": # item_name из ListView уже содержит .lnk
+                full_path_candidate_with_ext = os.path.join(search_path_dir, item_name)
+                if os.path.isfile(full_path_candidate_with_ext):
+                    initial_type_before_resolve = "ярлык"
+                    target_path = _resolve_lnk_target(full_path_candidate_with_ext)
+                    if target_path and os.path.exists(target_path):
+                        determined_path = target_path
+                        if os.path.isdir(target_path):
+                            determined_type = "папка"
+                            final_item_name_for_classification = os.path.basename(target_path)
+                        else:
+                            target_name_no_ext, target_ext = os.path.splitext(os.path.basename(target_path))
+                            final_item_name_for_classification = target_name_no_ext
+                            target_ext_lower = target_ext.lower()
+                            if target_ext_lower == '.exe': determined_type = "исполняемый файл"
+                            elif target_ext_lower in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.ico']: determined_type = "изображение"
+                            elif target_ext_lower in ['.txt', '.doc', '.docx', '.rtf', '.odt']: determined_type = "текстовый файл"
+                            elif target_ext_lower == '.pdf': determined_type = "пдф"
+                            else: determined_type = "файл"
+                    else:
+                        determined_type = "ярлык"
+                        determined_path = full_path_candidate_with_ext
+                        final_item_name_for_classification = original_item_name_without_ext
+                    return final_item_name_for_classification, determined_type, determined_path, initial_type_before_resolve
+
+            elif original_item_ext == ".url": # item_name из ListView уже содержит .url
+                full_path_candidate_with_ext = os.path.join(search_path_dir, item_name)
+                if os.path.isfile(full_path_candidate_with_ext):
+                    initial_type_before_resolve = "интернет-ярлык"
                     target_url = _resolve_url_target(full_path_candidate_with_ext)
-                    determined_path = target_url if target_url else full_path_candidate_with_ext
-                    return determined_type, determined_path
+                    if target_url:
+                        determined_type = "интернет-ярлык"
+                        determined_path = target_url
+                        final_item_name_for_classification = original_item_name_without_ext
+                    else:
+                        determined_type = "интернет-ярлык"
+                        determined_path = full_path_candidate_with_ext
+                        final_item_name_for_classification = original_item_name_without_ext
+                    return final_item_name_for_classification, determined_type, determined_path, initial_type_before_resolve
 
-
-        # 2. Эвристика по самому имени, если путь не найден на рабочих столах (менее надежно)
-        name_lower = item_name.lower()
-        if name_lower.endswith(".lnk"):
+        # Эвристика, если файл не найден на рабочих столах
+        final_item_name_for_classification = original_item_name_without_ext if original_item_ext else item_name
+        if original_item_ext == ".lnk":
+            initial_type_before_resolve = "ярлык"
             determined_type = "ярлык"
-            # determined_path остается пустым, так как без файла ярлыка его цель не может быть разрешена
-        elif name_lower.endswith(".url"):
+        elif original_item_ext == ".url":
+            initial_type_before_resolve = "интернет-ярлык"
             determined_type = "интернет-ярлык"
-            # determined_path остается пустым, так как без файла .url его URL не может быть разрешен
+        elif original_item_ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp', '.ico']:
+            initial_type_before_resolve = "изображение"
+            determined_type = "изображение"
+        elif original_item_ext == '.txt':
+            initial_type_before_resolve = "текстовый файл"
+            determined_type = "текстовый файл"
+        elif original_item_ext == '.pdf':
+            initial_type_before_resolve = "пдф"
+            determined_type = "пдф"
+        elif original_item_ext == '.exe':
+            initial_type_before_resolve = "исполняемый файл"
+            determined_type = "исполняемый файл"
+        elif original_item_ext: # Любой другой известный расширение
+            initial_type_before_resolve = "файл"
+            determined_type = "файл"
+        # Если нет расширения и файл не найден (например, "Корзина"), initial_type_before_resolve и determined_type остаются "неизвестный тип"
 
-        _, ext = os.path.splitext(name_lower)
-        if ext:  # Если в имени есть расширение
-            if ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp', '.ico']:
-                determined_type = "изображение"
-            elif ext == '.txt':
-                determined_type = "текстовый файл"
-            elif ext == '.pdf':
-                determined_type = "пдф"
-            # Можно добавить другие расширения по необходимости
-            else:
-                determined_type = "файл"
-
-        # Для системных объектов, таких как "Корзина", "Этот компьютер" и т.д.,
-        # determined_type останется "неизвестный тип", а determined_path — пустой строкой,
-        # что уместно, поскольку у них нет прямого файлового пути.
-
-        return determined_type, determined_path
+        return final_item_name_for_classification, determined_type, determined_path, initial_type_before_resolve
 
     # --- Конец вложенных вспомогательных функций ---
 
@@ -678,8 +844,9 @@ def get_desktop_icon_info(hwnd_listview: int, game_titles_list: list) -> list:
                     logging.warning(
                         f"Не удалось получить текст для элемента {i}. Код возврата SendMessage: {ret_text}. Ошибка Windows API: {ctypes.FormatError(error_code) if error_code else 'N/A'}")
 
-            # Определяем тип элемента и его полный путь
-            item_type, item_full_path = _determine_item_type(item_name, desktop_paths_list, game_titles_list)
+            # Определяем тип элемента, его полный путь, имя для классификации и начальный тип
+            item_name_for_classification, item_type, item_full_path, initial_type_before_resolve = \
+                _determine_item_type(item_name, desktop_paths_list, game_titles_list)
 
             ret_pos = user32.SendMessageW(hwnd_listview, LVM_GETITEMPOSITION, i, remote_point)
             if ret_pos == 1:
@@ -698,9 +865,11 @@ def get_desktop_icon_info(hwnd_listview: int, game_titles_list: list) -> list:
 
             # Создаем словарь данных для классификации
             icon_data_for_classification = {
-                'name': item_name,
+                'name': item_name_for_classification,
                 'type': item_type,
-                'full_path': item_full_path
+                'full_path': item_full_path,
+                'original_icon_name': item_name, # Имя иконки как на рабочем столе
+                'original_desktop_type': initial_type_before_resolve # Тип до разрешения ярлыков
             }
             # Получаем категорию иконки
             item_category = get_icon_category(icon_data_for_classification, game_titles_list)
@@ -712,7 +881,9 @@ def get_desktop_icon_info(hwnd_listview: int, game_titles_list: list) -> list:
                 'coords': (x, y),
                 'type': item_type,
                 'full_path': item_full_path,
-                'category': item_category  # Добавляем категорию
+                'category': item_category,
+                'classified_name': item_name_for_classification,
+                'original_desktop_type': initial_type_before_resolve # Для отладки, если нужно
             })
 
     except Exception as e:
@@ -1073,9 +1244,9 @@ if __name__ == "__main__":
         if icons_info:
             print("\n--- Информация об иконках рабочего стола ---")
             for icon in icons_info:
-                # Изменено для вывода индекса, типа и полного пути
+                # Изменено для вывода индекса, типа, полного пути и имени для классификации
                 # Категория теперь извлекается из данных иконки, где она была сохранена
-                print(f"Индекс: {icon['index']}, Имя: \"{icon['name']}\", Тип: {icon['type']}, Координаты: {icon['coords']}, Путь: {icon['full_path'] if icon['full_path'] else 'Не определен'}, Категория: {icon['category']}")
+                print(f"Индекс: {icon['index']}, Имя: \"{icon['name']}\", Тип: {icon['type']}, Коорд: {icon['coords']}, Путь: {icon['full_path'] if icon['full_path'] else 'N/A'}, Категория: {icon['category']}, Класс. имя: \"{icon['classified_name']}\"")
 
             print(f"\nВсего иконок: {len(icons_info)}")
 
